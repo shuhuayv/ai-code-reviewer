@@ -79,13 +79,20 @@ public class RepoService {
     }
 
     public PageResult<CodeFileResponse> pageCodeFiles(Long repoId, int pageNum, int pageSize) {
-        Page<CodeFile> page = new Page<>(pageNum, pageSize);
-        Page<CodeFile> result = codeFileMapper.selectPage(page,
-                new LambdaQueryWrapper<CodeFile>()
-                        .eq(CodeFile::getRepoId, repoId)
-                        .orderByAsc(CodeFile::getFilePath));
-        return PageResult.of(result.getTotal(), result.getCurrent(), result.getSize(),
-                result.getRecords().stream().map(this::toCodeFileResponse).toList());
+        LambdaQueryWrapper<CodeFile> wrapper = new LambdaQueryWrapper<CodeFile>()
+                .eq(CodeFile::getRepoId, repoId)
+                .orderByAsc(CodeFile::getFilePath);
+
+        long total = codeFileMapper.selectCount(wrapper);
+
+        int offset = (pageNum - 1) * pageSize;
+        wrapper.last("LIMIT " + pageSize + " OFFSET " + offset);
+
+        List<CodeFileResponse> records = codeFileMapper.selectList(wrapper).stream()
+                .map(this::toCodeFileResponse)
+                .toList();
+
+        return PageResult.of(total, pageNum, pageSize, records);
     }
 
     private RepoResponse toResponse(RepoInfo repo) {
