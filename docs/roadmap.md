@@ -12,6 +12,8 @@
 - [x] 基于扫描代码的规则驱动评审（7 条规则，优先 Java 核心包）
 - [x] Markdown 格式评审报告
 - [x] 数据库迁移脚本（migrate_db.sh）
+- [x] 一键演示脚本（demo_review_flow.sh）
+- [x] 报告导出接口（/report/markdown）
 
 ## 下一阶段
 

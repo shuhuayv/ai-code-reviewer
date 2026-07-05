@@ -143,6 +143,16 @@ src/main/java/com/shuhuayv/codereviewer/
 | GET | `/api/reviews/tasks/{id}` | 任务详情 |
 | GET | `/api/reviews/tasks/{id}/issues` | 问题列表 |
 | GET | `/api/reviews/tasks/{id}/report` | 评审报告（含 markdownContent） |
+| GET | `/api/reviews/tasks/{id}/report/markdown` | 导出 Markdown 报告（纯文本） |
+
+## 一键演示
+
+```bash
+chmod +x scripts/*.sh
+bash scripts/demo_review_flow.sh
+```
+
+脚本自动串联：创建 repo → clone → scan → review → 导出 Markdown 报告到 `reports/generated/`。
 
 ## 完整演示链路
 
@@ -166,15 +176,18 @@ curl -X POST http://localhost:8080/api/reviews/tasks \
 # 5. 查看问题列表
 curl http://localhost:8080/api/reviews/tasks/1/issues
 
-# 6. 查看 Markdown 报告
+# 6. 查看 JSON 报告
 curl http://localhost:8080/api/reviews/tasks/1/report
+
+# 7. 导出 Markdown 报告
+curl http://localhost:8080/api/reviews/tasks/1/report/markdown -o review-report.md
 ```
 
 ## 评审机制
 
-- **有扫描数据时**：基于 `code_file` 表中的真实代码内容，执行 7 条规则检测（入参校验、事务、异常、日志、安全、TODO、复杂度），生成具体问题列表和 Markdown 报告
+- **有扫描数据时**：基于 `code_file` 表中的真实代码内容，执行 7 条规则检测，生成 Markdown 报告
 - **无扫描数据时**：回退到固定 3 条 Mock issue，确保接口始终可用
-- 评审结果为 **规则驱动**，未接入真实大模型 API
+- **当前为规则驱动 Mock AI**，未接入真实大模型 API。后续可替换为真实 AI 服务
 
 ## 注意事项
 

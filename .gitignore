@@ -2,9 +2,10 @@ target/
 .env
 .env.local
 repos/
+reports/generated/
 logs/
-.DS_Store
 *.log
+.DS_Store
 .idea/
 *.iml
 .vscode/

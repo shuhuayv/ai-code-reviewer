@@ -70,6 +70,18 @@ GET /api/reviews/tasks/{id}/report
 }
 ```
 
+### 5. 导出 Markdown 报告
+
+```
+GET /api/reviews/tasks/{id}/report/markdown
+```
+
+**响应**: 直接返回 `text/markdown` 纯文本，可直接保存为 `.md` 文件。
+
+```bash
+curl "http://localhost:8080/api/reviews/tasks/1/report/markdown" -o review-task-1.md
+```
+
 ## 评审机制
 
 ### 基于已扫描代码（优先）

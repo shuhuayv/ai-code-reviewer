@@ -136,6 +136,16 @@ public class ReviewService {
                 .build();
     }
 
+    public String getTaskReportMarkdown(Long taskId) {
+        ReviewReport report = reviewReportMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ReviewReport>()
+                        .eq(ReviewReport::getTaskId, taskId));
+        if (report == null) {
+            throw new BusinessException(404, "评审报告不存在: " + taskId);
+        }
+        return report.getMarkdownContent() != null ? report.getMarkdownContent() : "";
+    }
+
     // ==================== fallback Mock ====================
 
     private List<ReviewIssue> generateFallbackIssues(Long taskId) {
