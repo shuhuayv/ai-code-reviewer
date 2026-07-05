@@ -98,3 +98,28 @@ PENDING → COMPLETED
 ```
 
 > 生产环境应改为 PENDING → RUNNING → COMPLETED/FAILED 的异步流程。
+
+## 表结构同步
+
+当前表结构以 `sql/init.sql` 为准。如果本地数据库早于当前代码版本，可能出现 `Unknown column` 错误（如 `remark`、`line_count`、`content_hash`）。
+
+**解决方案**：运行迁移脚本，自动检测并添加缺失字段。
+
+```bash
+export DB_NAME=ai_code_reviewer
+export DB_USERNAME=root
+bash scripts/migrate_db.sh
+```
+
+迁移脚本可重复执行，不会删除已有数据。
+
+迁移脚本覆盖以下字段：
+
+| 表 | 字段 | 说明 |
+|----|------|------|
+| repo_info | remark | 状态备注 |
+| code_file | file_name | 文件名 |
+| code_file | content | 文件内容 |
+| code_file | char_count | 字符数 |
+| code_file | line_count | 行数 |
+| code_file | content_hash | SHA-256 哈希值 |

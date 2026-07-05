@@ -39,11 +39,23 @@ mybatis-plus:
 
 ## 数据库初始化
 
+首次使用：
+
 ```bash
-mysql -u root -p < sql/init.sql
+bash scripts/init_db.sh
 ```
 
-脚本会创建数据库 `ai_code_reviewer` 和 6 张业务表。
+## 数据库迁移
+
+已有旧版本数据库时（出现 `Unknown column` 错误）：
+
+```bash
+export DB_NAME=ai_code_reviewer
+export DB_USERNAME=root
+bash scripts/migrate_db.sh
+```
+
+迁移脚本使用 `information_schema` 检测缺失字段并自动添加，可重复执行，不会删除已有数据。
 
 ## MyBatis-Plus 自动填充
 

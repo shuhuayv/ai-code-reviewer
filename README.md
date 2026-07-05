@@ -22,10 +22,21 @@
 - Redis 7.0+
 - Maven 3.9+
 
-### 2. 初始化数据库
+### 2. 数据库初始化与迁移
+
+**首次使用**：
 
 ```bash
-mysql -u root -p < sql/init.sql
+chmod +x scripts/*.sh
+bash scripts/init_db.sh
+```
+
+**已有旧版本数据库**（出现 Unknown column 错误时）：
+
+```bash
+export DB_NAME=ai_code_reviewer
+export DB_USERNAME=root
+bash scripts/migrate_db.sh
 ```
 
 ### 3. 配置环境变量
