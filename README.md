@@ -8,6 +8,7 @@
 - **MyBatis-Plus 3.5.16** ORM
 - **MySQL** 数据库
 - **Redis** 缓存
+- **JGit** 仓库克隆
 - **SpringDoc OpenAPI** Swagger 文档
 - **Lombok** 代码简化
 - **Jakarta Validation** 参数校验
@@ -63,14 +64,18 @@ src/main/java/com/shuhuayv/codereviewer/
 │   ├── ApiResponse.java              # 统一响应
 │   └── PageResult.java               # 分页结果
 ├── config/
-│   └── OpenApiConfig.java            # Swagger 配置
+│   ├── OpenApiConfig.java            # Swagger 配置
+│   └── MybatisPlusMetaObjectHandler.java  # 自动填充
 ├── controller/
-│   ├── RepoController.java           # 仓库接口
+│   ├── RepoController.java           # 仓库接口（CRUD + 克隆 + 扫描）
 │   └── ReviewController.java         # 评审任务接口
 ├── dto/
 │   ├── CreateRepoRequest.java        # 创建仓库请求
 │   ├── CreateReviewTaskRequest.java  # 创建评审请求
 │   ├── RepoResponse.java             # 仓库响应
+│   ├── RepoCloneResponse.java        # 克隆响应
+│   ├── CodeScanResponse.java         # 扫描响应
+│   ├── CodeFileResponse.java         # 代码文件响应
 │   ├── ReviewTaskResponse.java       # 评审任务响应
 │   ├── ReviewTaskDetailResponse.java # 评审任务详情
 │   ├── ReviewIssueResponse.java      # 评审问题响应
@@ -94,7 +99,12 @@ src/main/java/com/shuhuayv/codereviewer/
 │   └── PromptTemplateMapper.java     # Prompt模板 Mapper
 └── service/
     ├── RepoService.java              # 仓库服务
-    └── ReviewService.java            # 评审服务（Mock）
+    ├── ReviewService.java            # 评审服务（Mock）
+    ├── GitRepoService.java           # Git 克隆接口
+    ├── CodeScanService.java          # 代码扫描接口
+    └── impl/
+        ├── JGitRepoServiceImpl.java  # JGit 克隆实现
+        └── CodeScanServiceImpl.java  # 代码扫描实现
 ```
 
 ## API 概览
@@ -108,6 +118,10 @@ src/main/java/com/shuhuayv/codereviewer/
 | GET | `/api/repos/page?pageNum=1&pageSize=10` | 分页查询 |
 | GET | `/api/repos/{id}` | 仓库详情 |
 | DELETE | `/api/repos/{id}` | 删除仓库 |
+| POST | `/api/repos/{id}/clone` | 克隆仓库（JGit） |
+| POST | `/api/repos/{id}/scan` | 扫描代码文件 |
+| GET | `/api/repos/{id}/files` | 代码文件列表 |
+| GET | `/api/repos/{id}/files/page?pageNum=1&pageSize=10` | 分页查询代码文件 |
 
 ### 评审任务管理（Mock）
 
@@ -121,5 +135,7 @@ src/main/java/com/shuhuayv/codereviewer/
 ## 注意事项
 
 - 评审任务为 **Mock 实现**，返回模拟评审结果，未接入真实大模型 API
+- 仓库克隆使用 **JGit**，克隆到 `repos/{repoId}` 目录（已在 .gitignore 中）
+- 代码扫描自动过滤 `.git`、`target`、`node_modules` 等目录
 - 生产环境请配置真实数据库密码和 Redis 密码
 - 不要将 `.env` 文件提交到版本控制

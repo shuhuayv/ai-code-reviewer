@@ -7,12 +7,13 @@
 - [x] 仓库信息管理接口（CRUD + 分页）
 - [x] Mock 评审任务接口（创建 + 查询 + 问题 + 报告）
 - [x] Swagger 文档
+- [x] JGit 仓库克隆（clone repos/{repoId}）
+- [x] 代码文件扫描（过滤 + 统计 + SHA-256 + 入库）
 
 ## 下一阶段
 
-- [ ] 仓库克隆（Git 操作）
-- [ ] 代码文件扫描与存储
 - [ ] 接入真实大模型 API（评审）
+- [ ] 文件内容读取与 AI 评审 Prompt 构建
 - [ ] 真实异步评审流程（PENDING → RUNNING → COMPLETED/FAILED）
 - [ ] Prompt 模板管理接口
 - [ ] 用户认证与权限

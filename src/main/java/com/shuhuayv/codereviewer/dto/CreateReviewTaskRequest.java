@@ -1,7 +1,6 @@
 package com.shuhuayv.codereviewer.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
@@ -13,11 +12,12 @@ public class CreateReviewTaskRequest {
     @Schema(description = "仓库ID", example = "1", requiredMode = Schema.RequiredMode.REQUIRED)
     private Long repoId;
 
-    @NotBlank(message = "Commit ID不能为空")
-    @Schema(description = "提交ID", example = "abc123def456", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "提交ID，为空时默认使用 mock-commit", example = "abc123def456")
     private String commitId;
 
-    @NotBlank(message = "分支不能为空")
-    @Schema(description = "评审分支", example = "feature/new-feature", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "评审分支，为空时默认使用仓库默认分支", example = "feature/new-feature")
     private String branch;
+
+    @Schema(description = "评审范围，默认 FULL_REPO", example = "FULL_REPO")
+    private String reviewScope;
 }

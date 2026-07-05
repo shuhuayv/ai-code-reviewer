@@ -3,10 +3,13 @@ package com.shuhuayv.codereviewer.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.shuhuayv.codereviewer.common.PageResult;
+import com.shuhuayv.codereviewer.dto.CodeFileResponse;
 import com.shuhuayv.codereviewer.dto.CreateRepoRequest;
 import com.shuhuayv.codereviewer.dto.RepoResponse;
+import com.shuhuayv.codereviewer.entity.CodeFile;
 import com.shuhuayv.codereviewer.entity.RepoInfo;
 import com.shuhuayv.codereviewer.exception.BusinessException;
+import com.shuhuayv.codereviewer.mapper.CodeFileMapper;
 import com.shuhuayv.codereviewer.mapper.RepoInfoMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -19,6 +22,7 @@ import java.util.List;
 public class RepoService {
 
     private final RepoInfoMapper repoInfoMapper;
+    private final CodeFileMapper codeFileMapper;
 
     @Transactional
     public RepoResponse create(CreateRepoRequest request) {
@@ -64,6 +68,26 @@ public class RepoService {
         repoInfoMapper.deleteById(id);
     }
 
+    public List<CodeFileResponse> listCodeFiles(Long repoId) {
+        return codeFileMapper.selectList(
+                new LambdaQueryWrapper<CodeFile>()
+                        .eq(CodeFile::getRepoId, repoId)
+                        .orderByAsc(CodeFile::getFilePath))
+                .stream()
+                .map(this::toCodeFileResponse)
+                .toList();
+    }
+
+    public PageResult<CodeFileResponse> pageCodeFiles(Long repoId, int pageNum, int pageSize) {
+        Page<CodeFile> page = new Page<>(pageNum, pageSize);
+        Page<CodeFile> result = codeFileMapper.selectPage(page,
+                new LambdaQueryWrapper<CodeFile>()
+                        .eq(CodeFile::getRepoId, repoId)
+                        .orderByAsc(CodeFile::getFilePath));
+        return PageResult.of(result.getTotal(), result.getCurrent(), result.getSize(),
+                result.getRecords().stream().map(this::toCodeFileResponse).toList());
+    }
+
     private RepoResponse toResponse(RepoInfo repo) {
         return RepoResponse.builder()
                 .id(repo.getId())
@@ -75,6 +99,18 @@ public class RepoService {
                 .status(repo.getStatus())
                 .createdAt(repo.getCreatedAt())
                 .updatedAt(repo.getUpdatedAt())
+                .build();
+    }
+
+    private CodeFileResponse toCodeFileResponse(CodeFile cf) {
+        return CodeFileResponse.builder()
+                .id(cf.getId())
+                .repoId(cf.getRepoId())
+                .filePath(cf.getFilePath())
+                .language(cf.getLanguage())
+                .lineCount(cf.getLineCount())
+                .contentHash(cf.getContentHash())
+                .createdAt(cf.getCreatedAt())
                 .build();
     }
 }

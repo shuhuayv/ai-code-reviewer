@@ -17,6 +17,8 @@ public class CodeFile {
     private String language;
     private String content;
     private Integer charCount;
+    private Integer lineCount;
+    private String contentHash;
 
     @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

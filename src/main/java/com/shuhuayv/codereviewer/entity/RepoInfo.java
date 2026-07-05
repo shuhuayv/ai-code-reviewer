@@ -18,6 +18,7 @@ public class RepoInfo {
     private String language;
     private String localPath;
     private String status;
+    private String remark;
 
     @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

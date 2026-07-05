@@ -17,7 +17,8 @@
 | description | VARCHAR(1000) | | 仓库描述 |
 | language | VARCHAR(50) | | 主要编程语言 |
 | local_path | VARCHAR(500) | | 本地克隆路径 |
-| status | VARCHAR(20) | NOT NULL, DEFAULT 'ACTIVE' | ACTIVE/INACTIVE |
+| status | VARCHAR(20) | NOT NULL, DEFAULT 'ACTIVE' | ACTIVE/CLONED/FAILED/INACTIVE |
+| remark | VARCHAR(500) | | 状态备注（克隆结果等） |
 | created_at | DATETIME | NOT NULL | 创建时间 |
 | updated_at | DATETIME | | 更新时间 |
 
@@ -32,7 +33,11 @@
 | language | VARCHAR(50) | | 文件语言 |
 | content | LONGTEXT | | 文件内容 |
 | char_count | INT | DEFAULT 0 | 字符数 |
+| line_count | INT | DEFAULT 0 | 行数 |
+| content_hash | VARCHAR(64) | | SHA-256 哈希值 |
 | created_at | DATETIME | NOT NULL | 创建时间 |
+
+> 文件内容由 `CodeScanService` 扫描本地仓库后写入，`content_hash` 用于后续变更检测。
 
 ### 3. review_task（评审任务表）
 

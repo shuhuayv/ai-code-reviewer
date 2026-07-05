@@ -30,8 +30,8 @@ public class ReviewService {
         // 2. 创建 review_task
         ReviewTask task = new ReviewTask();
         task.setRepoId(request.getRepoId());
-        task.setCommitId(request.getCommitId());
-        task.setBranch(request.getBranch());
+        task.setCommitId(request.getCommitId() != null ? request.getCommitId() : "mock-commit");
+        task.setBranch(request.getBranch() != null ? request.getBranch() : repo.getBranch());
         task.setStatus("COMPLETED");
         task.setIssueCount(0);
         reviewTaskMapper.insert(task);

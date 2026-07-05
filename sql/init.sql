@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS repo_info (
     description VARCHAR(1000) COMMENT '仓库描述',
     language VARCHAR(50) COMMENT '主要编程语言',
     local_path VARCHAR(500) COMMENT '本地克隆路径',
-    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' COMMENT '状态: ACTIVE/INACTIVE',
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' COMMENT '状态: ACTIVE/CLONED/FAILED/INACTIVE',
+    remark VARCHAR(500) COMMENT '状态备注',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     INDEX idx_status (status),
@@ -33,6 +34,8 @@ CREATE TABLE IF NOT EXISTS code_file (
     language VARCHAR(50) COMMENT '文件语言',
     content LONGTEXT COMMENT '文件内容',
     char_count INT DEFAULT 0 COMMENT '字符数',
+    line_count INT DEFAULT 0 COMMENT '行数',
+    content_hash VARCHAR(64) COMMENT 'SHA-256 哈希值',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     INDEX idx_repo_id (repo_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='代码文件表';
