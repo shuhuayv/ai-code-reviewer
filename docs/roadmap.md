@@ -9,6 +9,9 @@
 - [x] Swagger 文档
 - [x] JGit 仓库克隆（clone repos/{repoId}）
 - [x] 代码文件扫描（过滤 + 统计 + SHA-256 + 入库）
+- [x] 基于扫描代码的规则驱动评审（7 条规则，优先 Java 核心包）
+- [x] Markdown 格式评审报告
+- [x] 数据库迁移脚本（migrate_db.sh）
 
 ## 下一阶段
 

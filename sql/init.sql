@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS review_report (
     task_id BIGINT NOT NULL COMMENT '关联评审任务ID',
     summary TEXT COMMENT '评审摘要',
     overall_assessment TEXT COMMENT '总体评价',
+    markdown_content LONGTEXT COMMENT 'Markdown 报告内容',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     UNIQUE INDEX idx_task_id (task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='评审报告表';

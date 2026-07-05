@@ -14,6 +14,7 @@ public class ReviewReport {
     private Long taskId;
     private String summary;
     private String overallAssessment;
+    private String markdownContent;
 
     @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

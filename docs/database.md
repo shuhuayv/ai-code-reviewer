@@ -75,6 +75,7 @@
 | task_id | BIGINT | NOT NULL, UNIQUE | 关联评审任务ID |
 | summary | TEXT | | 评审摘要 |
 | overall_assessment | TEXT | | 总体评价 |
+| markdown_content | LONGTEXT | | Markdown 格式评审报告，包含仓库摘要、问题表格、建议 |
 | created_at | DATETIME | NOT NULL | 创建时间 |
 
 ### 6. prompt_template（Prompt 模板表）
@@ -123,3 +124,4 @@ bash scripts/migrate_db.sh
 | code_file | char_count | 字符数 |
 | code_file | line_count | 行数 |
 | code_file | content_hash | SHA-256 哈希值 |
+| review_report | markdown_content | Markdown 评审报告 |

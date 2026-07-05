@@ -26,6 +26,9 @@ public class ReviewReportResponse {
     @Schema(description = "总体评价")
     private String overallAssessment;
 
+    @Schema(description = "Markdown 报告")
+    private String markdownContent;
+
     @Schema(description = "创建时间")
     private LocalDateTime createdAt;
 }

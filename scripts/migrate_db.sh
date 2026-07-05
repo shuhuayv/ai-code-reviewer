@@ -90,6 +90,18 @@ SET @sql = IF(@exists = 0,
   'SELECT "code_file.content_hash" AS "已存在，跳过"');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- ============================================
+-- review_report 表
+-- ============================================
+SELECT COUNT(*) INTO @exists
+FROM information_schema.columns
+WHERE table_schema = @dbname AND table_name = 'review_report' AND column_name = 'markdown_content';
+
+SET @sql = IF(@exists = 0,
+  'ALTER TABLE review_report ADD COLUMN markdown_content LONGTEXT DEFAULT NULL AFTER overall_assessment',
+  'SELECT "review_report.markdown_content" AS "已存在，跳过"');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 EOSQL
 
 echo "执行迁移 SQL..."
