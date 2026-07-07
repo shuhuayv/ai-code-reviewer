@@ -1,6 +1,8 @@
 package com.shuhuayv.codereviewer.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shuhuayv.codereviewer.dto.AiReviewAnalysisResult;
 import com.shuhuayv.codereviewer.entity.CodeFile;
 import com.shuhuayv.codereviewer.entity.ReviewIssue;
@@ -25,6 +27,7 @@ public class CodeReviewAnalysisService {
 
     private final CodeFileMapper codeFileMapper;
     private final CodeReviewModelService codeReviewModelService;
+    private final ObjectMapper objectMapper;
     private final boolean mockEnabled;
 
     private static final String AI_PROVIDER;
@@ -37,9 +40,11 @@ public class CodeReviewAnalysisService {
 
     public CodeReviewAnalysisService(CodeFileMapper codeFileMapper,
                                       CodeReviewModelService codeReviewModelService,
+                                      ObjectMapper objectMapper,
                                       @Value("${ai.mock-enabled:true}") boolean mockEnabled) {
         this.codeFileMapper = codeFileMapper;
         this.codeReviewModelService = codeReviewModelService;
+        this.objectMapper = objectMapper;
         this.mockEnabled = mockEnabled;
     }
 
@@ -52,6 +57,8 @@ public class CodeReviewAnalysisService {
     private static final int MAX_FILE_PATH_LENGTH = 500;
     private static final int MAX_CATEGORY_LENGTH = 50;
     private static final int MAX_TITLE_LENGTH = 500;
+    private static final int MAX_DESCRIPTION_LENGTH = 1000;
+    private static final int MAX_SUGGESTION_LENGTH = 1000;
     private static final String DEFAULT_FILE_PATH = "AI_RAW_REVIEW.md";
 
     private static final Set<String> SKIP_EXTENSIONS = Set.of("md", "xml", "yaml", "yml");
@@ -130,10 +137,21 @@ public class CodeReviewAnalysisService {
         log.info("AI prompt 长度={}", prompt.length());
         String aiResponse = codeReviewModelService.reviewCode(prompt);
         log.info("真实 AI 原始评审返回长度={}", aiResponse != null ? aiResponse.length() : 0);
-        List<ReviewIssue> issues = parseReviewResponse(aiResponse, validFilePaths);
-        boolean structuredParsed = issues != null && !issues.isEmpty();
 
-        log.info("repoId={} AI 评审完成，原始响应长度={}, 解析出 {} 个结构化问题",
+        // 先尝试 JSON 解析
+        boolean jsonStructured = isStructuredJsonReview(aiResponse);
+        List<ReviewIssue> issues = parseIssuesFromJson(aiResponse, validFilePaths);
+
+        if (!jsonStructured && issues.isEmpty()) {
+            // JSON 解析失败，fallback 到 Markdown 解析
+            issues = parseReviewResponse(aiResponse, validFilePaths);
+            if (!issues.isEmpty()) {
+                log.info("AI Markdown fallback 解析成功，issue 数量={}", issues.size());
+            }
+        }
+        boolean structuredParsed = jsonStructured || !issues.isEmpty();
+
+        log.info("repoId={} AI 评审完成，原始响应长度={}, AI 结构化最终 issue 数量={}",
                 repoId, aiResponse != null ? aiResponse.length() : 0, issues.size());
         return AiReviewAnalysisResult.builder()
                 .rawReviewText(aiResponse)
@@ -156,9 +174,10 @@ public class CodeReviewAnalysisService {
      */
     private String buildAiReviewPrompt(List<CodeFile> files) {
         StringBuilder sb = new StringBuilder();
+        sb.append("你必须直接输出最终 JSON 对象，第一字符必须是 {，最后字符必须是 }。不要输出分析过程、检查过程、自我修正或解释文字。\n");
         sb.append("请不要输出推理过程，不要长篇背景分析，只输出最终评审结果。\n");
         sb.append("总输出不超过 800 个中文字符，最多输出 3 条问题。\n");
-        sb.append("如果没有明显问题，也必须输出：未发现明显高风险问题，代码整体可维护性良好。\n");
+        sb.append("如果没有明显问题，也必须直接输出以下 JSON：{\"summary\":\"未发现明显高风险问题，代码整体可维护性良好。\",\"issues\":[]}\n");
         sb.append("禁止输出空内容。\n\n");
         sb.append("请对以下 Java 代码文件进行代码评审，只输出最重要的问题。\n");
         sb.append("注意：以下代码片段可能因长度限制被截断，请不要把片段末尾不完整（如 import 不完整、类体不完整、方法体不完整）当作语法错误。");
@@ -181,13 +200,27 @@ public class CodeReviewAnalysisService {
             included++;
         }
 
-        sb.append("请按以下格式输出每个问题（每个问题之间用 --- 分隔）：\n\n");
-        sb.append("**文件**: 文件路径\n");
-        sb.append("**严重级别**: ERROR / WARNING / SUGGESTION\n");
-        sb.append("**问题类型**: 如 SECURITY, PERFORMANCE, MAINTAINABILITY 等\n");
-        sb.append("**问题描述**: 具体描述\n");
-        sb.append("**修改建议**: 具体的修改建议\n\n");
-        sb.append("如果未发现明显问题，请返回一段简短总结，不要返回空内容。\n");
+        sb.append("请严格按以下 JSON 格式输出评审结果，只输出 JSON，不要输出 Markdown，不要输出代码块标记 ```json：\n\n");
+        sb.append("{\n");
+        sb.append("  \"summary\": \"一句话总结\",\n");
+        sb.append("  \"issues\": [\n");
+        sb.append("    {\n");
+        sb.append("      \"filePath\": \"src/main/java/xxx.java\",\n");
+        sb.append("      \"lineNumber\": 0,\n");
+        sb.append("      \"severity\": \"WARNING\",\n");
+        sb.append("      \"category\": \"MAINTAINABILITY\",\n");
+        sb.append("      \"title\": \"简短标题\",\n");
+        sb.append("      \"description\": \"问题说明\",\n");
+        sb.append("      \"suggestion\": \"修改建议\"\n");
+        sb.append("    }\n");
+        sb.append("  ]\n");
+        sb.append("}\n\n");
+        sb.append("要求：\n");
+        sb.append("- severity 只能是 ERROR / WARNING / SUGGESTION；\n");
+        sb.append("- lineNumber 不确定时用 0；\n");
+        sb.append("- filePath 必须来自上面提供的文件路径；\n");
+        sb.append("- issues 最多 3 条；\n");
+        sb.append("- 如果没有明显问题，输出：{\"summary\":\"未发现明显高风险问题，代码整体可维护性良好。\",\"issues\":[]}\n");
 
         log.info("AI prompt 构建完成，包含 {} 个文件，总长度={}", included, sb.length());
         return sb.toString();
@@ -266,6 +299,98 @@ public class CodeReviewAnalysisService {
         }
 
         return issues;
+    }
+
+    /**
+     * 从 AI 响应中提取 JSON 并解析为 ReviewIssue 列表（优先方案）。
+     * 支持直接 JSON、```json 代码块、前后有解释文字的 JSON。
+     * 解析失败时返回空列表，不抛异常，由调用方 fallback 到 Markdown 解析。
+     */
+    private List<ReviewIssue> parseIssuesFromJson(String response, Set<String> validFilePaths) {
+        log.info("AI JSON 结构化解析开始");
+        if (response == null || response.isBlank()) {
+            log.info("AI JSON 结构化解析失败，response 为空，fallback Markdown 解析");
+            return Collections.emptyList();
+        }
+
+        try {
+            String json = extractJsonContent(response);
+            if (json == null) {
+                log.info("AI JSON 结构化解析失败，无法提取 JSON 内容，fallback Markdown 解析");
+                return Collections.emptyList();
+            }
+
+            JsonNode root = objectMapper.readTree(json);
+            JsonNode issuesNode = root.get("issues");
+            if (issuesNode == null || !issuesNode.isArray()) {
+                log.info("AI JSON 结构化解析失败，issues 字段不是数组，fallback Markdown 解析");
+                return Collections.emptyList();
+            }
+
+            List<ReviewIssue> issues = new ArrayList<>();
+            for (JsonNode node : issuesNode) {
+                if (issues.size() >= 3) break;
+                ReviewIssue issue = new ReviewIssue();
+                issue.setFilePath(node.hasNonNull("filePath") ? node.get("filePath").asText() : null);
+                issue.setLineNumber(node.hasNonNull("lineNumber") ? node.get("lineNumber").asInt() : 0);
+                issue.setSeverity(node.hasNonNull("severity") ? node.get("severity").asText() : null);
+                issue.setCategory(node.hasNonNull("category") ? node.get("category").asText() : null);
+                issue.setTitle(node.hasNonNull("title") ? node.get("title").asText() : null);
+                issue.setDescription(node.hasNonNull("description") ? node.get("description").asText() : null);
+                issue.setSuggestion(node.hasNonNull("suggestion") ? node.get("suggestion").asText() : null);
+                issues.add(sanitizeAiIssue(issue, validFilePaths));
+            }
+
+            log.info("AI JSON 结构化解析成功，issue 数量={}", issues.size());
+            return issues;
+        } catch (Exception e) {
+            log.info("AI JSON 结构化解析失败，fallback Markdown 解析: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * 从 AI 响应文本中提取 JSON 内容。
+     * 去掉可能的 ```json 代码块标记，截取第一个 { 到最后一个 }。
+     */
+    private String extractJsonContent(String response) {
+        String cleaned = response.trim();
+        if (cleaned.startsWith("```json")) {
+            cleaned = cleaned.substring(7);
+        } else if (cleaned.startsWith("```")) {
+            cleaned = cleaned.substring(3);
+        }
+        if (cleaned.endsWith("```")) {
+            cleaned = cleaned.substring(0, cleaned.length() - 3);
+        }
+        cleaned = cleaned.trim();
+
+        int start = cleaned.indexOf('{');
+        int end = cleaned.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return cleaned.substring(start, end + 1);
+        }
+        return null;
+    }
+
+    /**
+     * 判断 AI 响应是否包含合法的结构化 JSON 评审结果。
+     * 只要响应是合法 JSON 且包含 issues 数组（即使为空），也认为结构化成功。
+     */
+    private boolean isStructuredJsonReview(String response) {
+        if (response == null || response.isBlank()) {
+            return false;
+        }
+        try {
+            String json = extractJsonContent(response);
+            if (json == null) {
+                return false;
+            }
+            JsonNode root = objectMapper.readTree(json);
+            return root.isObject() && root.has("issues") && root.get("issues").isArray();
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**
@@ -351,8 +476,20 @@ public class CodeReviewAnalysisService {
             issue.setTitle(t.substring(0, MAX_TITLE_LENGTH));
         }
 
-        // lineNumber 为空时用 0
-        if (issue.getLineNumber() == null) {
+        // description 截断
+        String desc = issue.getDescription();
+        if (desc != null && desc.length() > MAX_DESCRIPTION_LENGTH) {
+            issue.setDescription(desc.substring(0, MAX_DESCRIPTION_LENGTH));
+        }
+
+        // suggestion 截断
+        String sugg = issue.getSuggestion();
+        if (sugg != null && sugg.length() > MAX_SUGGESTION_LENGTH) {
+            issue.setSuggestion(sugg.substring(0, MAX_SUGGESTION_LENGTH));
+        }
+
+        // lineNumber 为空或小于 0 时用 0
+        if (issue.getLineNumber() == null || issue.getLineNumber() < 0) {
             issue.setLineNumber(0);
         }
 
