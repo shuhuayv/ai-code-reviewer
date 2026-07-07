@@ -4,16 +4,15 @@ import com.shuhuayv.codereviewer.dto.*;
 import com.shuhuayv.codereviewer.entity.*;
 import com.shuhuayv.codereviewer.exception.BusinessException;
 import com.shuhuayv.codereviewer.mapper.*;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ReviewService {
 
     private final RepoInfoMapper repoInfoMapper;
@@ -21,6 +20,21 @@ public class ReviewService {
     private final ReviewIssueMapper reviewIssueMapper;
     private final ReviewReportMapper reviewReportMapper;
     private final CodeReviewAnalysisService codeReviewAnalysisService;
+
+    private static final String AI_PROVIDER = System.getenv().getOrDefault("AI_PROVIDER", "mock");
+    private static final String AI_MODEL = System.getenv().getOrDefault("AI_MODEL", "glm-4.7-flash");
+
+    public ReviewService(RepoInfoMapper repoInfoMapper,
+                         ReviewTaskMapper reviewTaskMapper,
+                         ReviewIssueMapper reviewIssueMapper,
+                         ReviewReportMapper reviewReportMapper,
+                         CodeReviewAnalysisService codeReviewAnalysisService) {
+        this.repoInfoMapper = repoInfoMapper;
+        this.reviewTaskMapper = reviewTaskMapper;
+        this.reviewIssueMapper = reviewIssueMapper;
+        this.reviewReportMapper = reviewReportMapper;
+        this.codeReviewAnalysisService = codeReviewAnalysisService;
+    }
 
     @Transactional
     public ReviewTaskResponse createMockReview(CreateReviewTaskRequest request) {
@@ -39,28 +53,59 @@ public class ReviewService {
         task.setIssueCount(0);
         reviewTaskMapper.insert(task);
 
-        // 3. 生成评审问题：优先基于真实扫描代码，否则 fallback
-        List<ReviewIssue> issues = codeReviewAnalysisService.analyze(request.getRepoId());
-        if (issues.isEmpty()) {
-            log.info("repoId={} 没有已扫描的代码文件，使用 fallback Mock 数据", request.getRepoId());
-            issues = generateFallbackIssues(task.getId());
+        // 3. 生成评审问题：Mock 模式用规则驱动，AI 模式用模型评审
+        boolean mockEnabled = codeReviewAnalysisService.isMockEnabled();
+        List<ReviewIssue> issues;
+        String aiRawResponse = null;
+        if (mockEnabled) {
+            issues = codeReviewAnalysisService.analyze(request.getRepoId());
         } else {
-            log.info("repoId={} 基于已扫描代码分析，共发现 {} 个问题", request.getRepoId(), issues.size());
+            try {
+                AiReviewAnalysisResult aiResult = codeReviewAnalysisService.analyzeWithAi(request.getRepoId());
+                issues = aiResult.getIssues();
+                aiRawResponse = aiResult.getRawReviewText();
+                log.info("ReviewService 收到 AI 原始评审，长度={}, structuredParsed={}",
+                        aiRawResponse != null ? aiRawResponse.length() : 0, aiResult.isStructuredParsed());
+            } catch (Exception e) {
+                log.error("AI 评审失败: {}", e.getMessage());
+                throw new BusinessException(502, "AI 评审失败: " + e.getMessage());
+            }
+        }
+
+        if (issues.isEmpty()) {
+            if (mockEnabled) {
+                log.info("repoId={} 没有已扫描的代码文件，使用 fallback Mock 数据", request.getRepoId());
+                issues = generateFallbackIssues(task.getId());
+            } else {
+                log.info("repoId={} AI 评审未发现代码文件", request.getRepoId());
+            }
+        } else {
+            String mode = mockEnabled ? "规则驱动" : "AI (" + AI_PROVIDER + "/" + AI_MODEL + ")";
+            log.info("repoId={} {} 评审，共发现 {} 个问题", request.getRepoId(), mode, issues.size());
             for (ReviewIssue issue : issues) {
                 issue.setTaskId(task.getId());
             }
         }
 
+        // 保存 issues，单条失败不阻塞整个任务
+        List<ReviewIssue> savedIssues = new ArrayList<>();
         for (ReviewIssue issue : issues) {
-            reviewIssueMapper.insert(issue);
+            try {
+                reviewIssueMapper.insert(issue);
+                savedIssues.add(issue);
+            } catch (Exception e) {
+                log.warn("保存 review_issue 失败，跳过该问题: filePath={}, severity={}, error={}",
+                        issue.getFilePath(), issue.getSeverity(), e.getMessage());
+            }
         }
+        issues = savedIssues;
 
         // 更新问题数量
         task.setIssueCount(issues.size());
         reviewTaskMapper.updateById(task);
 
         // 4. 生成 review_report（含 Markdown）
-        ReviewReport report = generateReport(task.getId(), repo, request.getRepoId(), issues);
+        ReviewReport report = generateReport(task.getId(), repo, request.getRepoId(), issues, mockEnabled, aiRawResponse);
         reviewReportMapper.insert(report);
 
         // 5. 返回响应
@@ -184,15 +229,40 @@ public class ReviewService {
 
     // ==================== 报告生成 ====================
 
-    private ReviewReport generateReport(Long taskId, RepoInfo repo, Long repoId, List<ReviewIssue> issues) {
+    private ReviewReport generateReport(Long taskId, RepoInfo repo, Long repoId, List<ReviewIssue> issues,
+                                        boolean mockEnabled, String aiRawResponse) {
+        long errorCount = issues.stream().filter(i -> "ERROR".equals(i.getSeverity())).count();
         long warningCount = issues.stream().filter(i -> "WARNING".equals(i.getSeverity())).count();
         long suggestionCount = issues.stream().filter(i -> "SUGGESTION".equals(i.getSeverity())).count();
 
-        String summary = String.format("本次代码评审共发现 %d 个问题，其中警告 %d 个、建议 %d 个。",
-                issues.size(), warningCount, suggestionCount);
-        String assessment = "代码整体质量良好，结构清晰，符合团队编码规范。建议根据评审意见进行优化后合并。";
+        String reviewMode = mockEnabled ? "规则驱动 Mock" : "真实 AI (" + AI_PROVIDER + "/" + AI_MODEL + ")";
+        boolean hasStructured = !issues.isEmpty();
+        String summary;
+        String assessment;
+        if (mockEnabled) {
+            summary = String.format("本次代码评审（%s）共发现 %d 个问题，其中错误 %d 个、警告 %d 个、建议 %d 个。",
+                    reviewMode, issues.size(), errorCount, warningCount, suggestionCount);
+            assessment = "代码整体质量良好，结构清晰，符合团队编码规范。建议根据评审意见进行优化后合并。";
+        } else {
+            boolean hasRaw = aiRawResponse != null && !aiRawResponse.isBlank();
+            if (hasStructured) {
+                summary = String.format("本次代码评审（%s）共发现 %d 个问题，其中错误 %d 个、警告 %d 个、建议 %d 个。",
+                        reviewMode, issues.size(), errorCount, warningCount, suggestionCount);
+            } else if (hasRaw) {
+                summary = "真实 AI 已完成评审，未解析出结构化问题，原始评审意见已保留在报告中。";
+            } else {
+                summary = "真实 AI 已完成评审，但未获得有效原始评审文本。";
+            }
+            assessment = "代码评审由 AI 模型 " + AI_MODEL + " 完成，"
+                    + (hasStructured
+                        ? "评审意见基于对代码内容的多维度分析，请结合实际情况采纳。"
+                        : hasRaw
+                            ? "模型未返回可结构化保存的问题，但原始评审意见已保留在报告「AI Raw Review」章节中，请查看。"
+                            : "模型未返回可结构化保存的问题，且本次未获得有效原始评审文本。");
+        }
 
-        String markdown = buildMarkdownReport(repo, repoId, issues, warningCount, suggestionCount);
+        String markdown = buildMarkdownReport(repo, repoId, issues, errorCount, warningCount, suggestionCount,
+                mockEnabled, aiRawResponse, hasStructured);
 
         ReviewReport report = new ReviewReport();
         report.setTaskId(taskId);
@@ -203,9 +273,19 @@ public class ReviewService {
     }
 
     private String buildMarkdownReport(RepoInfo repo, Long repoId, List<ReviewIssue> issues,
-                                        long warningCount, long suggestionCount) {
+                                        long errorCount, long warningCount, long suggestionCount, boolean mockEnabled,
+                                        String aiRawResponse, boolean hasStructured) {
         StringBuilder sb = new StringBuilder();
         sb.append("# AI Code Review Report\n\n");
+
+        if (!mockEnabled) {
+            sb.append("> **评审模式**: 真实 AI 评审\n");
+            sb.append("> **Provider**: ").append(AI_PROVIDER).append("\n");
+            sb.append("> **Model**: ").append(AI_MODEL).append("\n");
+            sb.append("> **解析出结构化问题**: ").append(hasStructured ? "是" : "否").append("\n\n");
+        } else {
+            sb.append("> **评审模式**: Mock 规则驱动\n\n");
+        }
 
         sb.append("## 1. Repository Summary\n");
         sb.append("- **Repo ID**: ").append(repoId).append("\n");
@@ -214,29 +294,69 @@ public class ReviewService {
         sb.append("- **Branch**: ").append(repo.getBranch()).append("\n");
         sb.append("- **Review Scope**: FULL_REPO\n");
         sb.append("- **Issue Count**: ").append(issues.size()).append("\n");
+        sb.append("- **Errors**: ").append(errorCount).append("\n");
         sb.append("- **Warnings**: ").append(warningCount).append("\n");
         sb.append("- **Suggestions**: ").append(suggestionCount).append("\n\n");
 
         sb.append("## 2. Overall Assessment\n");
-        sb.append("代码整体质量良好，结构清晰。基于规则检测发现 ").append(issues.size())
-                .append(" 个问题，建议在合并前处理 WARNING 级别问题，SUGGESTION 级别可根据实际情况采纳。\n\n");
-
-        sb.append("## 3. Issues\n\n");
-        sb.append("| # | 文件 | 风险等级 | 问题类型 | 问题描述 | 修改建议 |\n");
-        sb.append("|---|------|----------|----------|----------|----------|\n");
-        for (int i = 0; i < issues.size(); i++) {
-            ReviewIssue issue = issues.get(i);
-            String severity = "WARNING".equals(issue.getSeverity()) ? "⚠️ 警告" : "💡 建议";
-            sb.append("| ").append(i + 1)
-                    .append(" | ").append(issue.getFilePath())
-                    .append(" | ").append(severity)
-                    .append(" | ").append(issue.getCategory())
-                    .append(" | ").append(issue.getDescription())
-                    .append(" | ").append(issue.getSuggestion())
-                    .append(" |\n");
+        if (mockEnabled) {
+            sb.append("代码整体质量良好，结构清晰。基于规则检测发现 ").append(issues.size())
+                    .append(" 个问题，建议在合并前处理 WARNING 级别问题，SUGGESTION 级别可根据实际情况采纳。\n\n");
+        } else {
+            boolean hasRaw = aiRawResponse != null && !aiRawResponse.isBlank();
+            sb.append("代码评审由 AI 模型 ").append(AI_MODEL).append(" 完成，基于对代码内容的安全性、健壮性、可维护性、性能和工程规范等多维度分析。");
+            if (!hasStructured) {
+                if (hasRaw) {
+                    sb.append("模型未返回可结构化保存的问题，但原始评审意见已保留在「AI Raw Review」章节中。");
+                } else {
+                    sb.append("模型未返回可结构化保存的问题，且未获得有效原始评审文本。");
+                }
+            }
+            sb.append("请结合实际情况评估每个问题的严重性。\n\n");
         }
 
-        sb.append("\n## 4. Recommendations\n");
+        sb.append("## 3. Issues\n\n");
+        if (issues.isEmpty()) {
+            if (!mockEnabled) {
+                sb.append("AI 模型未返回可结构化解析的问题，请查看「AI Raw Review」章节了解原始评审意见。\n\n");
+            } else {
+                sb.append("未发现需要关注的问题。\n\n");
+            }
+        } else {
+            sb.append("| # | 文件 | 风险等级 | 问题类型 | 问题描述 | 修改建议 |\n");
+            sb.append("|---|------|----------|----------|----------|----------|\n");
+            for (int i = 0; i < issues.size(); i++) {
+                ReviewIssue issue = issues.get(i);
+                String severity = switch (issue.getSeverity()) {
+                    case "ERROR" -> "❌ 错误";
+                    case "WARNING" -> "⚠️ 警告";
+                    default -> "💡 建议";
+                };
+                sb.append("| ").append(i + 1)
+                        .append(" | ").append(issue.getFilePath())
+                        .append(" | ").append(severity)
+                        .append(" | ").append(issue.getCategory())
+                        .append(" | ").append(issue.getDescription())
+                        .append(" | ").append(issue.getSuggestion())
+                        .append(" |\n");
+            }
+        }
+
+        // AI 原始评审内容章节（真实 AI 模式下始终展示）
+        if (!mockEnabled) {
+            boolean hasRaw = aiRawResponse != null && !aiRawResponse.isBlank();
+            sb.append("\n## 4. AI Raw Review\n\n");
+            sb.append("> 以下是 AI 模型 (").append(AI_PROVIDER).append("/").append(AI_MODEL)
+                    .append(") 返回的原始评审内容：\n\n");
+            if (hasRaw) {
+                String safe = aiRawResponse.replace("```", "'''");
+                sb.append("```text\n").append(safe).append("\n```\n");
+            } else {
+                sb.append("未获得有效原始评审文本。\n");
+            }
+        }
+
+        sb.append("\n## ").append(mockEnabled ? "4" : "5").append(". Recommendations\n");
         sb.append("1. 完善单元测试覆盖率，确保核心业务逻辑有充分的测试保护\n");
         sb.append("2. 统一异常处理机制，所有业务异常通过 GlobalExceptionHandler 统一返回\n");
         sb.append("3. 加强日志记录，关键操作和异常情况应记录详细日志\n");
