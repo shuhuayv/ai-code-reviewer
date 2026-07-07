@@ -17,6 +17,7 @@ REPORTS_DIR="reports/generated"
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+RED='\033[0;31m'
 NC='\033[0m'
 
 echo_step() {
@@ -32,6 +33,33 @@ echo_success() {
 echo_info() {
     echo -e "${YELLOW}→ $1${NC}"
 }
+
+echo_warn() {
+    echo -e "${RED}⚠ $1${NC}"
+}
+
+# 检测 AI 模式
+AI_MOCK_ENABLED="${AI_MOCK_ENABLED:-true}"
+AI_PROVIDER="${AI_PROVIDER:-mock}"
+AI_MODEL="${AI_MODEL:-glm-4.7-flash}"
+
+echo "============================================================"
+echo "  AI Code Reviewer - 一键演示"
+echo "============================================================"
+echo ""
+if [ "$AI_MOCK_ENABLED" = "false" ]; then
+    echo "  AI 模式: 真实 AI 评审"
+    echo "  Provider: ${AI_PROVIDER}"
+    echo "  Model   : ${AI_MODEL}"
+    if [ -z "${ZHIPU_API_KEY:-}" ] && [ -z "${AI_API_KEY:-}" ]; then
+        echo_warn "未配置 ZHIPU_API_KEY 或 AI_API_KEY，请设置环境变量"
+        echo "  export ZHIPU_API_KEY='your_api_key'"
+        exit 1
+    fi
+else
+    echo "  AI 模式: Mock AI（规则驱动）"
+fi
+echo "============================================================"
 
 # 检查服务是否启动
 echo_step "检查服务状态"

@@ -110,13 +110,16 @@ src/main/java/com/shuhuayv/codereviewer/
 │   └── PromptTemplateMapper.java     # Prompt模板 Mapper
 ├── service/
     ├── RepoService.java              # 仓库服务
-    ├── ReviewService.java            # 评审服务（规则驱动 + fallback）
-    ├── CodeReviewAnalysisService.java  # 代码评审分析（7 条规则）
+    ├── ReviewService.java            # 评审服务（Mock/AI 双模式）
+    ├── CodeReviewAnalysisService.java  # 代码评审分析（规则驱动 + AI 调用）
+    ├── CodeReviewModelService.java     # AI 模型服务接口（Mock/Real）
     ├── GitRepoService.java           # Git 克隆接口
     ├── CodeScanService.java          # 代码扫描接口
     └── impl/
         ├── JGitRepoServiceImpl.java  # JGit 克隆实现
-        └── CodeScanServiceImpl.java  # 代码扫描实现
+        ├── CodeScanServiceImpl.java  # 代码扫描实现
+        ├── MockCodeReviewModelServiceImpl.java         # Mock 评审实现
+        └── OpenAiCompatibleCodeReviewModelServiceImpl.java  # 真实 AI 评审实现
 ```
 
 ## API 概览
@@ -185,13 +188,35 @@ curl http://localhost:8080/api/reviews/tasks/1/report/markdown -o review-report.
 
 ## 评审机制
 
-- **有扫描数据时**：基于 `code_file` 表中的真实代码内容，执行 7 条规则检测，生成 Markdown 报告
-- **无扫描数据时**：回退到固定 3 条 Mock issue，确保接口始终可用
-- **当前为规则驱动 Mock AI**，未接入真实大模型 API。后续可替换为真实 AI 服务
+项目支持两种评审模式，通过环境变量 `AI_MOCK_ENABLED` 切换：
+
+### Mock 模式（默认）
+
+```bash
+export AI_MOCK_ENABLED=true
+```
+
+基于 7 条内置规则检测常见问题（参数校验、事务控制、异常处理、日志记录、敏感信息、TODO 标记、代码复杂度），无需外部 API Key。
+
+### 智谱 GLM 真实 AI 评审模式
+
+```bash
+export AI_MOCK_ENABLED=false
+export AI_PROVIDER=zhipu
+export ZHIPU_API_KEY='your_api_key'
+export AI_API_BASE_URL='https://open.bigmodel.cn/api/paas/v4'
+export AI_MODEL='glm-4.7-flash'
+```
+
+真实 AI 评审采用 OpenAI-compatible Chat Completions 接口，后续可切换阿里百炼、DeepSeek、火山方舟等兼容 OpenAI 的 provider。
+
+> **注意**：
+> - 不要提交真实 API Key
+> - API Key 只能通过环境变量配置
+> - 默认 Mock 模式无需配置即可运行
 
 ## 注意事项
 
-- 评审任务为 **规则驱动 + fallback Mock**，未接入真实大模型 API
 - 仓库克隆使用 **JGit**，克隆到 `repos/{repoId}` 目录（已在 .gitignore 中）
 - 代码扫描自动过滤 `.git`、`target`、`node_modules` 等目录
 - 生产环境请配置真实数据库密码和 Redis 密码

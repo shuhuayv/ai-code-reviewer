@@ -14,7 +14,43 @@
 | REPO_BASE_DIR | repos | 仓库本地存储目录 |
 | MAX_FILE_SIZE | 200000 | 单个文件最大字符数 |
 | MAX_TOTAL_CHARS | 60000 | 评审总字符数上限 |
-| AI_MOCK_ENABLED | true | 是否启用 Mock 评审 |
+| AI_MOCK_ENABLED | true | 是否启用 Mock 评审（false 时使用真实 AI） |
+| AI_PROVIDER | mock | AI provider（mock/zhipu） |
+| AI_API_KEY | (空) | AI API Key（或 ZHIPU_API_KEY） |
+| AI_API_BASE_URL | https://open.bigmodel.cn/api/paas/v4 | AI API 基础地址 |
+| AI_MODEL | glm-4.7-flash | AI 模型名称 |
+| AI_TIMEOUT_SECONDS | 30 | API 超时（秒） |
+| AI_MAX_TOKENS | 2048 | 最大输出 token 数 |
+| AI_TEMPERATURE | 0.2 | 生成温度 |
+
+## AI 评审模式
+
+项目支持两种评审模式，通过 `AI_MOCK_ENABLED` 切换：
+
+### Mock 模式（默认）
+
+```bash
+export AI_MOCK_ENABLED=true
+```
+
+基于 7 条内置规则检测常见问题，无需外部 API Key。
+
+### 智谱 GLM 真实 AI 评审
+
+```bash
+export AI_MOCK_ENABLED=false
+export AI_PROVIDER=zhipu
+export ZHIPU_API_KEY='your_api_key'
+export AI_API_BASE_URL='https://open.bigmodel.cn/api/paas/v4'
+export AI_MODEL='glm-4.7-flash'
+```
+
+真实 AI 评审采用 OpenAI-compatible Chat Completions 接口，后续可切换阿里百炼、DeepSeek、火山方舟等兼容 OpenAI 的 provider。
+
+> **注意**：
+> - 不要提交真实 API Key
+> - API Key 只能通过环境变量配置
+> - 默认 Mock 模式无需配置即可运行
 
 ## application.yml 关键配置
 
