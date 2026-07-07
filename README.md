@@ -157,6 +157,23 @@ bash scripts/demo_review_flow.sh
 
 脚本自动串联：创建 repo → clone → scan → review → 导出 Markdown 报告到 `reports/generated/`。
 
+## 重置 Demo 数据
+
+每次演示前可重置为干净状态：
+
+```bash
+# 预览将要清理的内容
+bash scripts/reset_demo_data.sh --dry-run
+
+# 交互确认后执行清理
+bash scripts/reset_demo_data.sh
+
+# 跳过确认直接执行
+bash scripts/reset_demo_data.sh --yes
+```
+
+脚本会清理数据库 demo 仓库数据（review_issue → review_report → review_task → code_file → repository）和本地 `repos/`、`reports/generated/` 目录中的 demo 文件。
+
 ## 完整演示链路
 
 ```bash

@@ -57,6 +57,7 @@ public class ReviewService {
         boolean mockEnabled = codeReviewAnalysisService.isMockEnabled();
         List<ReviewIssue> issues;
         String aiRawResponse = null;
+        boolean aiStructuredParsed = false;
         if (mockEnabled) {
             issues = codeReviewAnalysisService.analyze(request.getRepoId());
         } else {
@@ -64,8 +65,9 @@ public class ReviewService {
                 AiReviewAnalysisResult aiResult = codeReviewAnalysisService.analyzeWithAi(request.getRepoId());
                 issues = aiResult.getIssues();
                 aiRawResponse = aiResult.getRawReviewText();
+                aiStructuredParsed = aiResult.isStructuredParsed();
                 log.info("ReviewService 收到 AI 原始评审，长度={}, structuredParsed={}",
-                        aiRawResponse != null ? aiRawResponse.length() : 0, aiResult.isStructuredParsed());
+                        aiRawResponse != null ? aiRawResponse.length() : 0, aiStructuredParsed);
             } catch (Exception e) {
                 log.error("AI 评审失败: {}", e.getMessage());
                 throw new BusinessException(502, "AI 评审失败: " + e.getMessage());
@@ -105,7 +107,7 @@ public class ReviewService {
         reviewTaskMapper.updateById(task);
 
         // 4. 生成 review_report（含 Markdown）
-        ReviewReport report = generateReport(task.getId(), repo, request.getRepoId(), issues, mockEnabled, aiRawResponse);
+        ReviewReport report = generateReport(task.getId(), repo, request.getRepoId(), issues, mockEnabled, aiRawResponse, aiStructuredParsed);
         reviewReportMapper.insert(report);
 
         // 5. 返回响应
@@ -230,13 +232,14 @@ public class ReviewService {
     // ==================== 报告生成 ====================
 
     private ReviewReport generateReport(Long taskId, RepoInfo repo, Long repoId, List<ReviewIssue> issues,
-                                        boolean mockEnabled, String aiRawResponse) {
+                                        boolean mockEnabled, String aiRawResponse, boolean structuredParsed) {
         long errorCount = issues.stream().filter(i -> "ERROR".equals(i.getSeverity())).count();
         long warningCount = issues.stream().filter(i -> "WARNING".equals(i.getSeverity())).count();
         long suggestionCount = issues.stream().filter(i -> "SUGGESTION".equals(i.getSeverity())).count();
 
         String reviewMode = mockEnabled ? "规则驱动 Mock" : "真实 AI (" + AI_PROVIDER + "/" + AI_MODEL + ")";
         boolean hasStructured = !issues.isEmpty();
+        boolean hasRaw = aiRawResponse != null && !aiRawResponse.isBlank();
         String summary;
         String assessment;
         if (mockEnabled) {
@@ -244,10 +247,11 @@ public class ReviewService {
                     reviewMode, issues.size(), errorCount, warningCount, suggestionCount);
             assessment = "代码整体质量良好，结构清晰，符合团队编码规范。建议根据评审意见进行优化后合并。";
         } else {
-            boolean hasRaw = aiRawResponse != null && !aiRawResponse.isBlank();
             if (hasStructured) {
                 summary = String.format("本次代码评审（%s）共发现 %d 个问题，其中错误 %d 个、警告 %d 个、建议 %d 个。",
                         reviewMode, issues.size(), errorCount, warningCount, suggestionCount);
+            } else if (structuredParsed) {
+                summary = "真实 AI 已完成评审，结构化解析成功，未发现可保存的问题。";
             } else if (hasRaw) {
                 summary = "真实 AI 已完成评审，未解析出结构化问题，原始评审意见已保留在报告中。";
             } else {
@@ -256,13 +260,15 @@ public class ReviewService {
             assessment = "代码评审由 AI 模型 " + AI_MODEL + " 完成，"
                     + (hasStructured
                         ? "评审意见基于对代码内容的多维度分析，请结合实际情况采纳。"
-                        : hasRaw
-                            ? "模型未返回可结构化保存的问题，但原始评审意见已保留在报告「AI Raw Review」章节中，请查看。"
-                            : "模型未返回可结构化保存的问题，且本次未获得有效原始评审文本。");
+                        : structuredParsed
+                            ? "模型返回了结构化评审结果，本次未发现可保存的问题。"
+                            : hasRaw
+                                ? "模型未返回可结构化保存的问题，但原始评审意见已保留在报告「AI Raw Review」章节中，请查看。"
+                                : "模型未返回可结构化保存的问题，且本次未获得有效原始评审文本。");
         }
 
         String markdown = buildMarkdownReport(repo, repoId, issues, errorCount, warningCount, suggestionCount,
-                mockEnabled, aiRawResponse, hasStructured);
+                mockEnabled, aiRawResponse, hasStructured, structuredParsed);
 
         ReviewReport report = new ReviewReport();
         report.setTaskId(taskId);
@@ -274,7 +280,7 @@ public class ReviewService {
 
     private String buildMarkdownReport(RepoInfo repo, Long repoId, List<ReviewIssue> issues,
                                         long errorCount, long warningCount, long suggestionCount, boolean mockEnabled,
-                                        String aiRawResponse, boolean hasStructured) {
+                                        String aiRawResponse, boolean hasStructured, boolean structuredParsed) {
         StringBuilder sb = new StringBuilder();
         sb.append("# AI Code Review Report\n\n");
 
@@ -282,7 +288,7 @@ public class ReviewService {
             sb.append("> **评审模式**: 真实 AI 评审\n");
             sb.append("> **Provider**: ").append(AI_PROVIDER).append("\n");
             sb.append("> **Model**: ").append(AI_MODEL).append("\n");
-            sb.append("> **解析出结构化问题**: ").append(hasStructured ? "是" : "否").append("\n\n");
+            sb.append("> **AI 输出结构化解析**: ").append(structuredParsed ? "成功" : "失败").append("\n\n");
         } else {
             sb.append("> **评审模式**: Mock 规则驱动\n\n");
         }
@@ -303,10 +309,11 @@ public class ReviewService {
             sb.append("代码整体质量良好，结构清晰。基于规则检测发现 ").append(issues.size())
                     .append(" 个问题，建议在合并前处理 WARNING 级别问题，SUGGESTION 级别可根据实际情况采纳。\n\n");
         } else {
-            boolean hasRaw = aiRawResponse != null && !aiRawResponse.isBlank();
             sb.append("代码评审由 AI 模型 ").append(AI_MODEL).append(" 完成，基于对代码内容的安全性、健壮性、可维护性、性能和工程规范等多维度分析。");
             if (!hasStructured) {
-                if (hasRaw) {
+                if (structuredParsed) {
+                    sb.append("模型返回了结构化评审结果，本次未发现可保存的问题。");
+                } else if (aiRawResponse != null && !aiRawResponse.isBlank()) {
                     sb.append("模型未返回可结构化保存的问题，但原始评审意见已保留在「AI Raw Review」章节中。");
                 } else {
                     sb.append("模型未返回可结构化保存的问题，且未获得有效原始评审文本。");
@@ -318,7 +325,11 @@ public class ReviewService {
         sb.append("## 3. Issues\n\n");
         if (issues.isEmpty()) {
             if (!mockEnabled) {
-                sb.append("AI 模型未返回可结构化解析的问题，请查看「AI Raw Review」章节了解原始评审意见。\n\n");
+                if (structuredParsed) {
+                    sb.append("AI 输出已成功结构化解析，本次未发现可保存的问题。\n\n");
+                } else {
+                    sb.append("AI 模型未返回可结构化解析的问题，请查看「AI Raw Review」章节了解原始评审意见。\n\n");
+                }
             } else {
                 sb.append("未发现需要关注的问题。\n\n");
             }

@@ -28,6 +28,8 @@ import java.util.Map;
 @ConditionalOnProperty(name = "ai.mock-enabled", havingValue = "false")
 public class OpenAiCompatibleCodeReviewModelServiceImpl implements CodeReviewModelService {
 
+    private static final String SAFE_EMPTY_REVIEW_JSON = "{\"summary\":\"AI 未返回最终结构化评审结果，未发现可保存的高风险问题。\",\"issues\":[]}";
+
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
     private final String apiKey;
@@ -155,7 +157,7 @@ public class OpenAiCompatibleCodeReviewModelServiceImpl implements CodeReviewMod
             String text = content.asText();
             log.info("AI API content 文本长度={}", text.length());
             if (!text.isBlank()) {
-                return text;
+                return normalizeReviewJsonText(text);
             }
             // content 是 STRING 但为空，尝试 reasoning_content
             log.info("content 为 STRING 但为空，尝试 fallback message.reasoning_content");
@@ -204,15 +206,151 @@ public class OpenAiCompatibleCodeReviewModelServiceImpl implements CodeReviewMod
 
     /**
      * 从 message.reasoning_content 中提取文本。
+     * reasoning_content 包含模型推理过程，不应直接展示。
+     * 优先尝试从中提取 JSON 评审结果；提取不到则返回安全空结果 JSON。
      */
     private String extractReasoningContent(JsonNode messageNode) {
         JsonNode reasoning = messageNode.get("reasoning_content");
         if (reasoning != null && reasoning.isTextual()) {
             String text = reasoning.asText();
-            log.info("AI API reasoning_content 文本长度={}", text.length());
-            return text.isBlank() ? null : text;
+            log.info("reasoning_content 非空，尝试提取最终 JSON，长度={}", text.length());
+            if (text.isBlank()) {
+                return null;
+            }
+            String json = extractJsonObject(text);
+            if (json != null) {
+                log.info("从 reasoning_content 提取 JSON 成功");
+                return normalizeReviewJsonText(json);
+            }
+            log.info("reasoning_content 未提取到 JSON，返回安全空结果 JSON");
+            return SAFE_EMPTY_REVIEW_JSON;
         }
         log.info("AI API reasoning_content 不可用");
         return null;
+    }
+
+    /**
+     * 从文本中提取合法的 JSON 评审结果。
+     * 支持直接 JSON、```json 包裹、转义 JSON（\" → "）、
+     * 以及混有解释文字的 JSON。
+     * 用括号计数提取多个 JSON object 候选，返回最后一个合法候选。
+     */
+    private String extractJsonObject(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+
+        List<String> rawTexts = new ArrayList<>();
+        rawTexts.add(text);
+
+        // 如果有转义 JSON，先反转义
+        if (text.contains("\\\"")) {
+            rawTexts.add(text.replace("\\\"", "\""));
+        }
+
+        String lastValid = null;
+        for (String raw : rawTexts) {
+            String candidate = extractLastValidJson(raw);
+            if (candidate != null) {
+                lastValid = candidate;
+            }
+        }
+        return lastValid;
+    }
+
+    /**
+     * 从单段文本中提取所有 JSON object 候选，返回最后一个合法者。
+     * 用括号计数：遇到 { 时计数+1，遇到 } 时计数-1，
+     * 计数归零时即为一个完整 JSON object。
+     */
+    private String extractLastValidJson(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+
+        // 先尝试去掉 ```json 代码块
+        String cleaned = text.trim();
+        if (cleaned.startsWith("```json")) {
+            cleaned = cleaned.substring(7);
+        } else if (cleaned.startsWith("```")) {
+            cleaned = cleaned.substring(3);
+        }
+        if (cleaned.endsWith("```")) {
+            cleaned = cleaned.substring(0, cleaned.length() - 3);
+        }
+        cleaned = cleaned.trim();
+
+        String lastValid = null;
+        int depth = 0;
+        int start = -1;
+
+        for (int i = 0; i < cleaned.length(); i++) {
+            char c = cleaned.charAt(i);
+            if (c == '{' && (i == 0 || cleaned.charAt(i - 1) != '\\')) {
+                if (depth == 0) {
+                    start = i;
+                }
+                depth++;
+            } else if (c == '}' && (i == 0 || cleaned.charAt(i - 1) != '\\')) {
+                depth--;
+                if (depth == 0 && start >= 0) {
+                    String candidate = cleaned.substring(start, i + 1);
+                    String normalized = tryNormalizeReviewJson(candidate);
+                    if (normalized != null) {
+                        lastValid = normalized;
+                    }
+                    start = -1;
+                }
+            }
+        }
+
+        return lastValid;
+    }
+
+    /**
+     * 规范化评审 JSON 文本。
+     * 如果文本是转义 JSON，通过 readTree + writeValueAsString 返回规范 JSON。
+     */
+    private String normalizeReviewJsonText(String text) {
+        if (text == null || text.isBlank()) {
+            return text;
+        }
+
+        String normalized = tryNormalizeReviewJson(text.trim());
+        if (normalized != null) {
+            return normalized;
+        }
+
+        if (text.contains("\\\"")) {
+            normalized = tryNormalizeReviewJson(text.replace("\\\"", "\"").trim());
+            if (normalized != null) {
+                return normalized;
+            }
+        }
+
+        return text;
+    }
+
+    private String tryNormalizeReviewJson(String candidate) {
+        try {
+            JsonNode root = objectMapper.readTree(candidate);
+            if (root.isObject() && root.has("summary") && root.has("issues") && root.get("issues").isArray()) {
+                return objectMapper.writeValueAsString(root);
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    /**
+     * 验证字符串是否为合法 JSON 且包含 "summary" 和 "issues" 字段。
+     */
+    private boolean isValidReviewJson(String candidate) {
+        try {
+            JsonNode root = objectMapper.readTree(candidate);
+            return root.isObject() && root.has("summary") && root.has("issues") && root.get("issues").isArray();
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

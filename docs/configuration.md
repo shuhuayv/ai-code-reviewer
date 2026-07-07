@@ -93,6 +93,33 @@ bash scripts/migrate_db.sh
 
 迁移脚本使用 `information_schema` 检测缺失字段并自动添加，可重复执行，不会删除已有数据。
 
+## Demo 数据重置
+
+每次演示前可重置为干净状态，清理数据库 demo 数据和本地文件：
+
+```bash
+# 预览将要清理的内容
+bash scripts/reset_demo_data.sh --dry-run
+
+# 交互确认后执行清理
+bash scripts/reset_demo_data.sh
+
+# 跳过确认直接执行
+bash scripts/reset_demo_data.sh --yes
+```
+
+脚本只清理 demo 仓库（`name='demo-repo'` 或 `url='https://github.com/spring-projects/spring-petclinic.git'`）的关联数据，按外键安全顺序删除：review_issue → review_report → review_task → code_file → repository。同时清理本地 `repos/` 目录和 `reports/generated/review-task-*.md` 文件。
+
+支持的环境变量（均有默认值）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| DB_HOST | localhost | 数据库主机 |
+| DB_PORT | 3306 | 数据库端口 |
+| DB_NAME | ai_code_reviewer | 数据库名称 |
+| DB_USERNAME | ai_dev | 数据库用户名 |
+| DB_PASSWORD | Ai_dev_123456 | 数据库密码 |
+
 ## MyBatis-Plus 自动填充
 
 所有实体的 `created_at` 和 `updated_at` 字段由 MyBatis-Plus 自动填充，无需手动设置。
