@@ -9,7 +9,7 @@
 
 set -e
 
-BASE_URL="${BASE_URL:-http://localhost:8080}"
+BASE_URL="${BASE_URL:-http://localhost:8081}"
 REPO_ID="${REPO_ID:-2}"
 REPORTS_DIR="reports/generated"
 

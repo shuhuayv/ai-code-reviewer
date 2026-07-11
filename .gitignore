@@ -9,3 +9,12 @@ logs/
 .idea/
 *.iml
 .vscode/
+
+# Local run artifacts (PID, logs)
+.demo-run/
+*.pid
+
+# Local database backups / recovery logs
+.recovery-backup/
+*.sql.bak
+backups/

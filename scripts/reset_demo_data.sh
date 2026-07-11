@@ -64,7 +64,7 @@ for arg in "$@"; do
             echo "清理范围:"
             echo "  - 本地 repos/ 下 demo 仓库的克隆目录"
             echo "  - 本地 reports/generated/review-task-*.md"
-            echo "  - 数据库 review_issue, review_report, review_task, code_file, repository"
+            echo "  - 数据库 review_issue, review_report, review_task, code_file, repo_info"
             echo "  - 只清理 name='demo-repo' 或 url='https://github.com/spring-projects/spring-petclinic.git' 的仓库数据"
             echo ""
             echo "安全保证:"
@@ -90,11 +90,18 @@ done
 # ============================================
 # 环境变量
 # ============================================
-DB_HOST="${DB_HOST:-localhost}"
-DB_PORT="${DB_PORT:-3306}"
+DB_HOST="${DB_HOST:-127.0.0.1}"
+DB_PORT="${DB_PORT:-3307}"
 DB_NAME="${DB_NAME:-ai_code_reviewer}"
-DB_USERNAME="${DB_USERNAME:-ai_dev}"
-DB_PASSWORD="${DB_PASSWORD:-Ai_dev_123456}"
+DB_USERNAME="${DB_USERNAME:-reviewer_app}"
+DB_PASSWORD="${DB_PASSWORD:-}"
+if [ -z "$DB_PASSWORD" ] && command -v security >/dev/null 2>&1; then
+    DB_PASSWORD="$(security find-generic-password -a reviewer_app -s ai-code-reviewer-db -w 2>/dev/null || true)"
+fi
+if [ -z "$DB_PASSWORD" ]; then
+    read -r -s -p "Reviewer database password: " DB_PASSWORD
+    echo ""
+fi
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REPOS_DIR="${PROJECT_DIR}/repos"
@@ -185,7 +192,7 @@ echo_success "数据库连接成功"
 # ============================================
 echo_step "1. 数据库 demo 数据"
 
-DEMO_REPO_IDS=$(echo "SELECT id FROM repository WHERE name = 'demo-repo' OR url = 'https://github.com/spring-projects/spring-petclinic.git';" \
+DEMO_REPO_IDS=$(echo "SELECT id FROM repo_info WHERE name = 'demo-repo' OR url = 'https://github.com/spring-projects/spring-petclinic.git';" \
     | ${MYSQL_CMD} -s --skip-column-names 2>/dev/null || true)
 
 DB_HAS_DATA=false
@@ -351,10 +358,10 @@ if [ "$DB_HAS_DATA" = true ]; then
         | ${MYSQL_CMD} 2>/dev/null || echo_warn "code_file 删除失败或无数据"
     echo_success "code_file 清理完成"
 
-    echo_info "删除 repository ..."
-    echo "DELETE FROM repository WHERE id IN (${REPO_ID_LIST});" \
-        | ${MYSQL_CMD} 2>/dev/null || echo_warn "repository 删除失败或无数据"
-    echo_success "repository 清理完成"
+    echo_info "删除 repo_info ..."
+    echo "DELETE FROM repo_info WHERE id IN (${REPO_ID_LIST});" \
+        | ${MYSQL_CMD} 2>/dev/null || echo_warn "repo_info 删除失败或无数据"
+    echo_success "repo_info 清理完成"
 else
     echo_step "清理数据库 demo 数据"
     echo_info "数据库中没有 demo 数据，跳过"
@@ -370,7 +377,7 @@ echo -e "==========================================${NC}"
 echo ""
 echo "已清理内容:"
 if [ "$DB_HAS_DATA" = true ]; then
-    echo "  - 数据库: ${DEMO_REPO_COUNT} 个 repository, ${TASK_COUNT} 个 task, ${ISSUE_COUNT} 个 issue, ${REPORT_COUNT} 个 report, ${CODE_FILE_COUNT} 个 code_file"
+    echo "  - 数据库: ${DEMO_REPO_COUNT} 个 repo_info, ${TASK_COUNT} 个 task, ${ISSUE_COUNT} 个 issue, ${REPORT_COUNT} 个 report, ${CODE_FILE_COUNT} 个 code_file"
 fi
 if [ -n "$LOCAL_REPO_DIRS" ]; then
     echo "  - 本地目录: repos/ 下的 demo 仓库目录"
