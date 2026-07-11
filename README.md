@@ -1,211 +1,127 @@
 # AI Code Reviewer
 
-基于大模型的代码评审平台（后端服务）。
+基于大模型的代码评审平台（后端服务）。支持 **Mock 规则评审**（默认，无需 Key）与 **真实智谱 GLM AI 评审**（OpenAI-compatible）双模式；覆盖「创建仓库 → JGit 克隆 → 代码扫描 → 创建评审 → 生成 Markdown 报告」全链路。
+
+> 数据库与接口当前**已恢复正常**：`/api/repos` 正常返回，表名为 `repo_info`（非旧版 `repository`）。
+
+## 真实能力边界（诚实口径）
+
+- **Mock 规则评审**：7 条内置规则（参数校验、事务控制、异常处理、日志、敏感信息、TODO、复杂度），无需外部 API，稳定可重复。
+- **真实 AI 评审**：调用智谱 GLM（默认 `glm-4.7-flash`，可经 `AI_MODEL` 覆盖）。**当前真实 AI 仅评审有限文件（默认前 3 个核心文件）、最多少量 issues**，且 JSON 解析链路健壮（content / reasoning_content / Markdown fallback）。
+- **不是** 商业级 SaaS、不做 Diff Review、不承诺全量评审或准确率。本地 Demo 无登录 / 权限 / 高并发承诺。
 
 ## 技术栈
 
-- **Java 21** + **Spring Boot 4.1.0**
-- **MyBatis-Plus 3.5.16** ORM
-- **MySQL** 数据库
-- **Redis** 缓存
-- **JGit** 仓库克隆
-- **SpringDoc OpenAPI** Swagger 文档
-- **Lombok** 代码简化
-- **Jakarta Validation** 参数校验
+- Java 21 + Spring Boot 4.1
+- MyBatis-Plus 3.5 + MySQL + Redis
+- JGit（仓库克隆）
+- Spring RestClient（OpenAI-compatible Chat 调用，非 Spring AI）
+- Springdoc OpenAPI + Lombok + Jakarta Validation
 
-## 快速开始
+## 系统架构
 
-### 1. 环境准备
+```
+RepoController → RepoService → JGitRepoServiceImpl(克隆到 repos/{id}, gitignored)
+                              → CodeScanServiceImpl(过滤 .git/target/node_modules 等)
+ReviewController → ReviewService(Mock/AI 双模式)
+                 → CodeReviewAnalysisService(规则驱动 + AI 调用)
+                 → CodeReviewModelService: MockCodeReviewModelServiceImpl / OpenAiCompatibleCodeReviewModelServiceImpl
+                 → 生成 Markdown 报告(review_report.markdown_content)
+```
 
-- JDK 21+
-- MySQL 8.0+
-- Redis 7.0+
-- Maven 3.9+
+数据表（MyBatis-Plus，建表见 `sql/init.sql`）：`repo_info` / `code_file` / `review_task` / `review_issue` / `review_report` / `prompt_template`。
 
-### 2. 数据库初始化与迁移
+## 核心业务流程
 
-**首次使用**：
+1. 创建仓库 `POST /api/repos`
+2. 克隆 `POST /api/repos/{id}/clone`（JGit）
+3. 扫描 `POST /api/repos/{id}/scan`
+4. 创建评审 `POST /api/reviews/tasks`（基于真实扫描代码，输出 Markdown 报告）
+5. 查看 `GET /api/reviews/tasks/{id}/issues` 与 `/report`（含 `markdownContent`）、`/report/markdown`
+
+## 本地依赖
+
+- JDK 21+、Maven 3.9+
+- MySQL（本机 mysql8 容器，端口 3307）、Redis 7（6379）
+- 真实 AI 模式需智谱 Key（Keychain `ai-code-reviewer-db` 存 DB 密码；Keychain 存 AI Key）
+
+## 环境变量
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `SERVER_PORT` | `8081` | 服务端口 |
+| `DB_HOST/DB_PORT/DB_NAME/DB_USERNAME/DB_PASSWORD` | 127.0.0.1/3307/ai_code_reviewer/reviewer_app | 数据库（密码从 Keychain 读取，不落地） |
+| `AI_MOCK_ENABLED` | `true` | `true`=Mock 规则评审；`false`=真实 AI |
+| `AI_PROVIDER` | `zhipu` | 真实 AI provider |
+| `AI_MODEL` | `glm-4.7-flash` | 真实 AI 模型 |
+| `ZHIPU_API_KEY` / `AI_API_KEY` | 空 | 智谱 Key（不提交） |
+
+## 本地启动
+
+### 1. 数据库初始化
 
 ```bash
 chmod +x scripts/*.sh
-bash scripts/init_db.sh
+bash scripts/init_db.sh                       # 首次建库建表
+# 旧库迁移（Unknown column 时）：bash scripts/migrate_db.sh
 ```
 
-**已有旧版本数据库**（出现 Unknown column 错误时）：
+### 2. 启动服务
 
 ```bash
-export DB_NAME=ai_code_reviewer
-export DB_USERNAME=root
-bash scripts/migrate_db.sh
-```
+# 推荐：从 Keychain 读密的安全脚本
+bash scripts/start_reviewer_local.sh
+bash scripts/stop_reviewer_local.sh
 
-### 3. 配置环境变量
-
-```bash
-cp .env.example .env
-# 编辑 .env 填写数据库密码等配置
-```
-
-### 4. 启动服务
-
-```bash
-mvn clean package -DskipTests
-java -jar target/ai-code-reviewer-1.0.0-SNAPSHOT.jar
-```
-
-或使用 Maven 插件：
-
-```bash
+# 或传统方式（需先 source .env 提供 DB_PASSWORD）
 mvn spring-boot:run
+# 或 java -jar target/ai-code-reviewer-1.0.0-SNAPSHOT.jar
 ```
 
-### 5. 访问地址
+### 3. 访问地址（注意端口为 8081）
 
 | 服务 | 地址 |
 |------|------|
-| API 服务 | http://localhost:8080 |
-| Swagger UI | http://localhost:8080/swagger-ui.html |
+| API 服务 | http://localhost:8081 |
+| Swagger UI | http://localhost:8081/swagger-ui.html |
 
-## 项目结构
+## 测试命令
 
-```
-src/main/java/com/shuhuayv/codereviewer/
-├── AiCodeReviewerApplication.java    # 入口
-├── common/
-│   ├── ApiResponse.java              # 统一响应
-│   └── PageResult.java               # 分页结果
-├── config/
-│   ├── OpenApiConfig.java            # Swagger 配置
-│   └── MybatisPlusMetaObjectHandler.java  # 自动填充
-├── controller/
-│   ├── RepoController.java           # 仓库接口（CRUD + 克隆 + 扫描）
-│   └── ReviewController.java         # 评审任务接口
-├── dto/
-│   ├── CreateRepoRequest.java        # 创建仓库请求
-│   ├── CreateReviewTaskRequest.java  # 创建评审请求
-│   ├── RepoResponse.java             # 仓库响应
-│   ├── RepoCloneResponse.java        # 克隆响应
-│   ├── CodeScanResponse.java         # 扫描响应
-│   ├── CodeFileResponse.java         # 代码文件响应
-│   ├── ReviewTaskResponse.java       # 评审任务响应
-│   ├── ReviewTaskDetailResponse.java # 评审任务详情
-│   ├── ReviewIssueResponse.java      # 评审问题响应
-│   └── ReviewReportResponse.java     # 评审报告响应
-├── entity/
-│   ├── RepoInfo.java                 # 仓库信息实体
-│   ├── CodeFile.java                 # 代码文件实体
-│   ├── ReviewTask.java               # 评审任务实体
-│   ├── ReviewIssue.java              # 评审问题实体
-│   ├── ReviewReport.java             # 评审报告实体
-│   └── PromptTemplate.java           # Prompt模板实体
-├── exception/
-│   ├── BusinessException.java        # 业务异常
-│   └── GlobalExceptionHandler.java   # 全局异常处理
-├── mapper/
-│   ├── RepoInfoMapper.java           # 仓库 Mapper
-│   ├── CodeFileMapper.java           # 代码文件 Mapper
-│   ├── ReviewTaskMapper.java         # 评审任务 Mapper
-│   ├── ReviewIssueMapper.java        # 评审问题 Mapper
-│   ├── ReviewReportMapper.java       # 评审报告 Mapper
-│   └── PromptTemplateMapper.java     # Prompt模板 Mapper
-├── service/
-    ├── RepoService.java              # 仓库服务
-    ├── ReviewService.java            # 评审服务（Mock/AI 双模式）
-    ├── CodeReviewAnalysisService.java  # 代码评审分析（规则驱动 + AI 调用）
-    ├── CodeReviewModelService.java     # AI 模型服务接口（Mock/Real）
-    ├── GitRepoService.java           # Git 克隆接口
-    ├── CodeScanService.java          # 代码扫描接口
-    └── impl/
-        ├── JGitRepoServiceImpl.java  # JGit 克隆实现
-        ├── CodeScanServiceImpl.java  # 代码扫描实现
-        ├── MockCodeReviewModelServiceImpl.java         # Mock 评审实现
-        └── OpenAiCompatibleCodeReviewModelServiceImpl.java  # 真实 AI 评审实现
+```bash
+mvn -B test          # 当前 0 个测试（Day 3 将补充仓库/克隆扫描/评审/Markdown/Controller 核心测试）
+mvn -B package -DskipTests
 ```
 
-## API 概览
+## CI
 
-### 仓库信息管理
+GitHub Actions：`.github/workflows/ci.yml`（push/PR main，Java 21，Maven 缓存，`mvn -B test` + `mvn -B package -DskipTests`）。测试用 Mock/H2/Testcontainers，不调用真实 API、不依赖本机真实库。
+
+## API / 页面入口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/repos` | 创建仓库 |
-| GET | `/api/repos` | 仓库列表 |
-| GET | `/api/repos/page?pageNum=1&pageSize=10` | 分页查询 |
-| GET | `/api/repos/{id}` | 仓库详情 |
-| DELETE | `/api/repos/{id}` | 删除仓库 |
-| POST | `/api/repos/{id}/clone` | 克隆仓库（JGit） |
-| POST | `/api/repos/{id}/scan` | 扫描代码文件 |
-| GET | `/api/repos/{id}/files` | 代码文件列表 |
-| GET | `/api/repos/{id}/files/page?pageNum=1&pageSize=10` | 分页查询代码文件 |
-
-### 评审任务管理（规则驱动 + fallback Mock）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
+| GET | `/api/repos` `/page` `/{id}` | 仓库列表/分页/详情 |
+| POST | `/api/repos/{id}/clone` `/scan` | 克隆 / 扫描 |
+| GET | `/api/repos/{id}/files` `/page` | 代码文件 |
 | POST | `/api/reviews/tasks` | 创建评审任务（含 Markdown 报告） |
-| GET | `/api/reviews/tasks/{id}` | 任务详情 |
-| GET | `/api/reviews/tasks/{id}/issues` | 问题列表 |
-| GET | `/api/reviews/tasks/{id}/report` | 评审报告（含 markdownContent） |
-| GET | `/api/reviews/tasks/{id}/report/markdown` | 导出 Markdown 报告（纯文本） |
+| GET | `/api/reviews/tasks/{id}` `/issues` `/report` `/report/markdown` | 任务/问题/JSON 报告/Markdown 报告 |
 
-## 一键演示
+## 演示步骤
 
 ```bash
-chmod +x scripts/*.sh
-bash scripts/demo_review_flow.sh
+bash scripts/demo_review_flow.sh     # 自动串联 创建repo→clone→scan→review→导出报告到 reports/generated/
 ```
 
-脚本自动串联：创建 repo → clone → scan → review → 导出 Markdown 报告到 `reports/generated/`。
-
-## 重置 Demo 数据
-
-每次演示前可重置为干净状态：
+重置 demo 数据（清理 `repo_info`/`review_*`/`code_file` 与本地 `repos/`、`reports/generated/`）：
 
 ```bash
-# 预览将要清理的内容
-bash scripts/reset_demo_data.sh --dry-run
-
-# 交互确认后执行清理
-bash scripts/reset_demo_data.sh
-
-# 跳过确认直接执行
 bash scripts/reset_demo_data.sh --yes
 ```
 
-脚本会清理数据库 demo 仓库数据（review_issue → review_report → review_task → code_file → repository）和本地 `repos/`、`reports/generated/` 目录中的 demo 文件。
-
-## 完整演示链路
-
-```bash
-# 1. 创建仓库
-curl -X POST http://localhost:8080/api/repos \
-  -H "Content-Type: application/json" \
-  -d '{"name":"demo","url":"https://github.com/user/repo.git","branch":"main","language":"Java"}'
-
-# 2. 克隆仓库
-curl -X POST http://localhost:8080/api/repos/1/clone
-
-# 3. 扫描代码文件
-curl -X POST http://localhost:8080/api/repos/1/scan
-
-# 4. 创建评审任务（基于真实扫描代码）
-curl -X POST http://localhost:8080/api/reviews/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"repoId":1,"reviewScope":"FULL_REPO"}'
-
-# 5. 查看问题列表
-curl http://localhost:8080/api/reviews/tasks/1/issues
-
-# 6. 查看 JSON 报告
-curl http://localhost:8080/api/reviews/tasks/1/report
-
-# 7. 导出 Markdown 报告
-curl http://localhost:8080/api/reviews/tasks/1/report/markdown -o review-report.md
-```
+> 注意：脚本与建表均使用 **`repo_info`** 表；旧文档若写 `repository` 为过时表述。
 
 ## 评审机制
-
-项目支持两种评审模式，通过环境变量 `AI_MOCK_ENABLED` 切换：
 
 ### Mock 模式（默认）
 
@@ -213,28 +129,37 @@ curl http://localhost:8080/api/reviews/tasks/1/report/markdown -o review-report.
 export AI_MOCK_ENABLED=true
 ```
 
-基于 7 条内置规则检测常见问题（参数校验、事务控制、异常处理、日志记录、敏感信息、TODO 标记、代码复杂度），无需外部 API Key。
+7 条规则检测，无需 API Key。
 
-### 智谱 GLM 真实 AI 评审模式
+### 真实 AI 评审模式
 
 ```bash
-export AI_MOCK_ENABLED=false
-export AI_PROVIDER=zhipu
-export ZHIPU_API_KEY='your_api_key'
-export AI_API_BASE_URL='https://open.bigmodel.cn/api/paas/v4'
+export AI_MOCK_ENABLED=false AI_PROVIDER=zhipu
+export ZHIPU_API_KEY='<从 Keychain 读取，绝不提交>'
 export AI_MODEL='glm-4.7-flash'
 ```
 
-真实 AI 评审采用 OpenAI-compatible Chat Completions 接口，后续可切换阿里百炼、DeepSeek、火山方舟等兼容 OpenAI 的 provider。
+OpenAI-compatible Chat Completions 接口，可切换阿里百炼 / DeepSeek / 火山方舟等兼容 provider。
 
-> **注意**：
-> - 不要提交真实 API Key
-> - API Key 只能通过环境变量配置
-> - 默认 Mock 模式无需配置即可运行
+## 已知限制
 
-## 注意事项
+- 真实 AI 仅评前 3 个核心文件、最多少量 issues；不是全量/商业级评审。
+- 不做 Diff Review、不做私有仓库凭证管理。
+- 多语言扫描以常见源码目录为主，超大文件/二进制会被跳过。
 
-- 仓库克隆使用 **JGit**，克隆到 `repos/{repoId}` 目录（已在 .gitignore 中）
-- 代码扫描自动过滤 `.git`、`target`、`node_modules` 等目录
-- 生产环境请配置真实数据库密码和 Redis 密码
-- 不要将 `.env` 文件提交到版本控制
+## 面试亮点
+
+- Mock / 真实 AI 双模式，JSON 解析健壮（多来源 fallback + 校验）。
+- JGit 克隆 + 目录过滤（.git/target/node_modules 等）的工程化扫描。
+- 数据库与接口已恢复，Keychain 读密、参数化配置，无明文落地。
+- 全链路 Markdown 报告导出 + 前端卡片化展示。
+
+## 故障排查
+
+- `405/404 端口不对`：本服务端口为 **8081**（非 8080），确认 `SERVER_PORT` 与前端代理一致。
+- `/api/repos` 报 500：检查 mysql8(3307) 是否启动、DB 密码是否经 Keychain 正确注入、`repo_info` 表是否存在（`bash scripts/init_db.sh`）。
+- 真实 AI 无结果：`AI_MOCK_ENABLED=false` 且 Key 已配置；受速率限制时稍后重试。
+
+## 文档
+
+[sql/init.sql](sql/init.sql) · [scripts/](scripts/) · Demo 详见 `bash scripts/demo_review_flow.sh`
